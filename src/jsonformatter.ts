@@ -37,8 +37,8 @@ function errorPageBody(error: Error, data: string) {
  * Encode a string to be used in HTML
  */
 function htmlEncode(t: any): string {
-  return typeof t !== "undefined" && t !== null
-    ? t
+  return t !== undefined && t !== null
+    ? (t as string)
         .toString()
         .replace(/&/g, "&amp;")
         .replace(/"/g, "&quot;")
@@ -58,10 +58,12 @@ function jsString(s: string): string {
 }
 
 /**
- * Is this a valid "bare" property name?
+ * Is this a valid "bare" property name (e.g. a JS identifier name or a numeric
+ * literal)? See https://mathiasbynens.be/notes/javascript-properties, though we
+ * only support a subset of valid identifier names (no weird Unicode stuff).
  */
 function isBareProp(prop: string): boolean {
-  return /^[A-Za-z_$][A-Za-z0-9_\-$]*$/.test(prop);
+  return /^([0-9]+|[A-Za-z_$][A-Za-z0-9_$]*)$/.test(prop);
 }
 
 /**
@@ -72,36 +74,37 @@ function decorateWithSpan(value: any, className: string) {
 }
 
 // Convert a basic JSON datatype (number, string, boolean, null, object, array) into an HTML fragment.
-function valueToHTML(value: any, path: string, indent: number) {
-  const valueType = typeof value;
-
+export function valueToHTML(value: any, path: string, indent: number) {
   if (value === null) {
     return decorateWithSpan("null", "null");
   } else if (Array.isArray(value)) {
     return arrayToHTML(value, path, indent);
-  } else if (valueType === "object") {
-    return objectToHTML(value, path, indent);
-  } else if (valueType === "number") {
-    return decorateWithSpan(value, "num");
-  } else if (valueType === "string" && value.charCodeAt(0) === 8203 && !isNaN(value.slice(1))) {
-    return decorateWithSpan(value.slice(1), "num");
-  } else if (valueType === "string") {
-    if (/^(http|https|file):\/\/[^\s]+$/i.test(value)) {
-      return `<a href="${htmlEncode(value)}"><span class="q">&quot;</span>${jsString(
-        value
-      )}<span class="q">&quot;</span></a>`;
-    } else {
-      return `<span class="string">&quot;${jsString(value)}&quot;</span>`;
-    }
-  } else if (valueType === "boolean") {
-    return decorateWithSpan(value, "bool");
   }
 
-  return "";
+  switch (typeof value) {
+    case "object":
+      return objectToHTML(value as Record<string, unknown>, path, indent);
+    case "number":
+      return decorateWithSpan(value, "num");
+    case "boolean":
+      return decorateWithSpan(value, "bool");
+    case "string":
+      if (value.charCodeAt(0) === 8203 /* zero-width space */ && !isNaN(Number(value.slice(1)))) {
+        return decorateWithSpan(Number(value.slice(1)), "num");
+      } else if (/^(http|https|file):\/\/[^\s]+$/i.test(value)) {
+        return `<a href="${htmlEncode(value)}"><span class="q">&quot;</span>${jsString(
+          value,
+        )}<span class="q">&quot;</span></a>`;
+      } else {
+        return `<span class="string">&quot;${jsString(value)}&quot;</span>`;
+      }
+    default:
+      return "";
+  }
 }
 
 // Convert an array into an HTML fragment
-function arrayToHTML(json: any, path: string, indent: number) {
+function arrayToHTML(json: any[], path: string, indent: number) {
   if (json.length === 0) {
     return "[ ]";
   }
@@ -126,7 +129,7 @@ function addIndent(indent: number) {
 }
 
 // Convert a JSON object to an HTML fragment
-function objectToHTML(json: any, path: string, indent: number) {
+function objectToHTML(json: Record<string, unknown>, path: string, indent: number) {
   let numProps = Object.keys(json).length;
   if (numProps === 0) {
     return "{ }";
@@ -145,7 +148,7 @@ function objectToHTML(json: any, path: string, indent: number) {
     output += `<li>${addIndent(indent + 1)}<span class="prop${
       bare ? "" : " quoted"
     }" title="${htmlEncode(subPath)}"><span class="q">&quot;</span>${jsString(
-      prop
+      prop,
     )}<span class="q">&quot;</span></span>: ${valueToHTML(json[prop], subPath, indent + 1)}`;
     if (numProps > 1) {
       output += ",";
@@ -155,7 +158,7 @@ function objectToHTML(json: any, path: string, indent: number) {
   }
 
   return `<span class="collapser"></span>{<ul class="obj collapsible">${output}</ul>${addIndent(
-    indent
+    indent,
   )}}`;
 }
 
@@ -196,9 +199,9 @@ function highlightError(data: string, lineNum?: number, columnNum?: number) {
     if (i === lineNum - 1) {
       output += '<span class="errorline">';
       output += `${htmlEncode(
-        line.substring(0, columnNum - 1)
+        line.substring(0, columnNum - 1),
       )}<span class="errorcolumn">${htmlEncode(line[columnNum - 1])}</span>${htmlEncode(
-        line.substring(columnNum)
+        line.substring(columnNum),
       )}`;
       output += "</span>";
     } else {
@@ -214,6 +217,7 @@ function toHTML(content: string, title: string) {
   return `<!DOCTYPE html>
 <html><head><title>${htmlEncode(title)}</title>
 <meta charset="utf-8">
+<meta name="color-scheme" content="light dark">
 <link rel="stylesheet" type="text/css" href="${chrome.runtime.getURL("viewer.css")}">
 </head><body>
 ${content}
